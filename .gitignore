@@ -1,0 +1,23 @@
+build
+out
+.vs
+.vscode
+output
+
+# vim backup and temp files
+*~
+.*.sw*
+.sw*
+
+*.i
+*.ii
+*.gpu
+*.ptx
+*.cubin
+*.fatbin
+
+models
+third_party
+
+.idea
+cmake-build-*
