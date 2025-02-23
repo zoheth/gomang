@@ -16,3 +16,10 @@ if(ENABLE_TENSORRT)
             ENABLE_TENSORRT
     )
 endif()
+
+if(ENABLE_MNN)
+    target_compile_definitions(test_common
+            PUBLIC
+            ENABLE_MNN
+    )
+endif ()

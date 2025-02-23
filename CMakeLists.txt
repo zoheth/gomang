@@ -22,6 +22,8 @@ option(ENABLE_MNN "enable MNN engine" OFF)
 option(ENABLE_NCNN "enable NCNN engine" OFF)
 option(BUILD_EXAMPLES "Build examples" ON)
 
+add_subdirectory(third_party)
+
 add_subdirectory(gomang)
 
 if(BUILD_EXAMPLES)
