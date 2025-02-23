@@ -1,59 +1,66 @@
 #pragma once
 
-#include <NvInfer.h>
 #include <iostream>
 #include <memory>
 #include <vector>
 
+#include <NvInfer.h>
+
+#include "core/engine.h"
+
+namespace gomang
+{
 class Logger final : public nvinfer1::ILogger
 {
   public:
-	void log(Severity severity, const char *msg) noexcept override
-	{
-		if (severity != Severity::kINFO)
-		{
-			std::cout << "TensorRT: " << msg << std::endl;
-		}
-	}
+	void log(Severity severity, const char *msg) noexcept override;
 };
 
-class TrtEngine
+class TrtAllocator : public IMemoryAllocator
+{
+public:
+	void* allocate(size_t size, MemoryType type) override;
+
+	void deallocate(void* ptr, MemoryType type) override;
+};
+
+class TrtEngine : public IEngine
 {
   public:
 	explicit TrtEngine(const std::string &trt_model_path, unsigned int num_threads = 1);
 
-	virtual ~TrtEngine();
+	~TrtEngine() override;
 
 	TrtEngine(const TrtEngine &)            = delete;
 	TrtEngine(TrtEngine &&)                 = delete;
 	TrtEngine &operator=(const TrtEngine &) = delete;
 	TrtEngine &operator=(TrtEngine &&)      = delete;
 
-	bool benchmark(int num_warmup = 10, int num_infer = 100);
+	bool infer(const std::vector<const void *> &inputs, const std::vector<void *> &outputs) override;
 
-  protected:
-	std::vector<float> prepare_fake_input() const;
+	IMemoryAllocator *getAllocator() override;
+
+	std::vector<TensorDesc> getInputInfo() const override;
+
+	std::vector<TensorDesc> getOutputInfo() const override;
 
   protected:
 	std::unique_ptr<nvinfer1::IRuntime>          trt_runtime_;
 	std::unique_ptr<nvinfer1::ICudaEngine>       trt_engine_;
 	std::unique_ptr<nvinfer1::IExecutionContext> trt_context_;
-
 	Logger trt_logger_;
 
-	std::vector<void *> buffers;
 	cudaStream_t        stream_{};
 
-	std::vector<int64_t>              input_node_dims_;
-	std::vector<std::vector<int64_t>> output_node_dims_;
-	std::size_t                       input_tensor_size_ = 1;
-	std::size_t                       output_tensor_size_{0};
+	TrtAllocator allocator_;
+	std::vector<std::shared_ptr<ITensor>> input_tensors_;
+	std::vector<std::shared_ptr<ITensor>> output_tensors_;
 
-	const char        *trt_model_path_{nullptr};
-	const char        *log_id{nullptr};
-	const unsigned int num_threads_;
 
   private:
-	void init_handler();
-	void print_debug_string();
+	void initHandler();
+	TensorDesc createTensorDesc(const char* tensor_name, const nvinfer1::Dims& dims, bool is_input);
+
+
 };
+}        // namespace gomang

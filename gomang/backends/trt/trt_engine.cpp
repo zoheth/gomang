@@ -5,86 +5,142 @@
 #include <fstream>
 #include <iostream>
 
-TrtEngine::TrtEngine(const std::string &trt_model_path, unsigned int num_threads) :
-    log_id(trt_model_path.data()),
-    num_threads_(num_threads),
-    trt_model_path_(trt_model_path.data())
+namespace gomang
 {
-	init_handler();
-	print_debug_string();
+void Logger::log(Severity severity, const char *msg) noexcept
+{
+	if (severity != Severity::kINFO)
+	{
+		std::cout << "TensorRT: " << msg << std::endl;
+	}
+}
+void *TrtAllocator::allocate(size_t size, MemoryType type)
+{
+	void *ptr = nullptr;
+	if (type == MemoryType::kGPU)
+	{
+		cudaMalloc(&ptr, size);
+	}
+	else if (type == MemoryType::kCPU_PINNED)
+	{
+		cudaMallocHost(&ptr, size);
+	}
+	else
+	{
+		std::cerr << "Unsupported memory type" << std::endl;
+	}
+	return ptr;
+}
+void TrtAllocator::deallocate(void *ptr, MemoryType type)
+{
+	if (type == MemoryType::kGPU)
+	{
+		cudaFree(ptr);
+	}
+	else if (type == MemoryType::kCPU_PINNED)
+	{
+		cudaFreeHost(ptr);
+	}
+	else
+	{
+		std::free(ptr);
+	}
+}
+
+TrtEngine::TrtEngine(const std::string &model_path, unsigned int num_threads) :
+    IEngine(model_path, num_threads)
+{
+	initHandler();
 }
 
 TrtEngine::~TrtEngine()
 {
-	for (auto buffer : buffers)
-	{
-		cudaFree(buffer);
-	}
+	input_tensors_.clear();
+	output_tensors_.clear();
 	cudaStreamDestroy(stream_);
 }
-
-bool TrtEngine::benchmark(int num_warmup, int num_infer)
+bool TrtEngine::infer(const std::vector<const void *> &inputs, const std::vector<void *> &outputs)
 {
-	if (!trt_context_)
+	if (!trt_context_ || inputs.size() != input_tensors_.size() ||
+	    outputs.size() != output_tensors_.size())
 	{
-		std::cerr << "TensorRT context not initialized!" << std::endl;
 		return false;
 	}
 
-	auto input_data = prepare_fake_input();
-
-	std::cout << "Warmup..." << std::endl;
-	for (int i = 0; i < num_warmup; ++i)
+	for (size_t i = 0; i < inputs.size(); ++i)
 	{
-		cudaMemcpyAsync(buffers[0], input_data.data(),
-		                input_data.size() * sizeof(float),
+		size_t size = input_tensors_[i]->size();
+		cudaMemcpyAsync(input_tensors_[i]->data(), inputs[i], size,
 		                cudaMemcpyHostToDevice, stream_);
+	}
+	cudaStreamSynchronize(stream_);
 
-		trt_context_->enqueueV3(stream_);
+	if (!trt_context_->enqueueV3(stream_))
+	{
+		return false;
 	}
 
-	std::cout << "Benchmarking..." << std::endl;
-	auto start = std::chrono::high_resolution_clock::now();
-
-	for (int i = 0; i < num_infer; ++i)
+	for (size_t i = 0; i < outputs.size(); ++i)
 	{
-		cudaMemcpyAsync(buffers[0], input_data.data(),
-		                input_data.size() * sizeof(float),
-		                cudaMemcpyHostToDevice, stream_);
-
-		trt_context_->enqueueV3(stream_);
+		cudaStreamSynchronize(stream_);
+		size_t size = output_tensors_[i]->size();
+		cudaMemcpyAsync(outputs[i], output_tensors_[i]->data(), size,
+		                cudaMemcpyDeviceToHost, stream_);
 	}
 
 	cudaStreamSynchronize(stream_);
-
-	auto end      = std::chrono::high_resolution_clock::now();
-	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-
-	float avg_time = duration.count() / 1000.0f / num_infer;
-	std::cout << "Average inference time: " << avg_time << " ms" << std::endl;
-	std::cout << "FPS: " << 1000.0f / avg_time << std::endl;
-
 	return true;
 }
-
-std::vector<float> TrtEngine::prepare_fake_input() const
+IMemoryAllocator *TrtEngine::getAllocator()
 {
-	size_t input_size = 1;
-	for (int dim : input_node_dims_)
+	return &allocator_;
+}
+std::vector<TensorDesc> TrtEngine::getInputInfo() const
+{
+	std::vector<TensorDesc> res;
+	res.reserve(input_tensors_.size());
+	for (const auto &tensor : input_tensors_)
 	{
-		input_size *= dim;
+		res.push_back(tensor->desc());
 	}
-	return std::vector<float>(input_size, 0.5f);
+	return res;
+}
+std::vector<TensorDesc> TrtEngine::getOutputInfo() const
+{
+	std::vector<TensorDesc> res;
+	res.reserve(output_tensors_.size());
+	for (const auto &tensor : output_tensors_)
+	{
+		res.push_back(tensor->desc());
+	}
+	return res;
 }
 
-void TrtEngine::init_handler()
+TensorDesc TrtEngine::createTensorDesc(const char *tensor_name, const nvinfer1::Dims &dims, bool is_input)
+{
+	TensorDesc desc;
+	desc.name = tensor_name;
+	desc.shape.resize(dims.nbDims);
+	for (int i = 0; i < dims.nbDims; i++)
+	{
+		desc.shape[i] = dims.d[i];
+	}
+
+	desc.layout    = MemoryLayout::kNCHW;
+	desc.data_type = DataType::kFLOAT32;
+	desc.mem_type  = MemoryType::kGPU;
+
+	return desc;
+}
+
+void TrtEngine::initHandler()
 {
 	// read engine file
-	std::ifstream file(trt_model_path_, std::ios::binary);
+	std::ifstream file(model_path_, std::ios::binary);
 
 	if (!file.good())
 	{
-		std::cerr << "Failed to read model file: " << trt_model_path_ << std::endl;
+		std::cerr << "Failed to read model file: " << model_path_ << std::endl;
 		return;
 	}
 	file.seekg(0, std::ifstream::end);
@@ -112,47 +168,26 @@ void TrtEngine::init_handler()
 
 	// make the flexible one input and multi output
 	int num_io_tensors = trt_engine_->getNbIOTensors();        // get the input and output's num
-	buffers.resize(num_io_tensors);
 
 	for (int i = 0; i < num_io_tensors; ++i)
 	{
 		auto           tensor_name = trt_engine_->getIOTensorName(i);
 		nvinfer1::Dims tensor_dims = trt_engine_->getTensorShape(tensor_name);
 
-		// input
-		if (i == 0)
+		bool       is_input = (i == 0);
+		TensorDesc desc     = createTensorDesc(tensor_name, tensor_dims, is_input);
+		auto       tensor   = std::make_shared<Tensor>(desc, &allocator_);
+		trt_context_->setTensorAddress(tensor_name, tensor->data());
+
+		if (is_input)
 		{
-			size_t tensor_size = 1;
-			for (int j = 0; j < tensor_dims.nbDims; ++j)
-			{
-				tensor_size *= tensor_dims.d[j];
-				input_node_dims_.push_back(tensor_dims.d[j]);
-			}
-			cudaMalloc(&buffers[i], tensor_size * sizeof(float));
-			trt_context_->setTensorAddress(tensor_name, buffers[i]);
-			continue;
+			input_tensors_.push_back(tensor);
 		}
-
-		// output
-		size_t tensor_size = 1;
-
-		std::vector<int64_t> output_node;
-		for (int j = 0; j < tensor_dims.nbDims; ++j)
+		else
 		{
-			output_node.push_back(tensor_dims.d[j]);
-			tensor_size *= tensor_dims.d[j];
+			output_tensors_.push_back(tensor);
 		}
-		output_node_dims_.push_back(output_node);
-
-		cudaMalloc(&buffers[i], tensor_size * sizeof(float));
-		trt_context_->setTensorAddress(tensor_name, buffers[i]);
-		output_tensor_size_++;
 	}
 }
 
-void TrtEngine::print_debug_string()
-{
-	std::cout << "TensorRT model loaded from: " << trt_model_path_ << std::endl;
-	std::cout << "Input tensor size: " << input_tensor_size_ << std::endl;
-	std::cout << "Output tensor size: " << output_tensor_size_ << std::endl;
-}
+}        // namespace gomang
