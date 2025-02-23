@@ -1,10 +1,15 @@
-file(GLOB_RECURSE GOMANG_SOURCES
-        "${CMAKE_CURRENT_SOURCE_DIR}/backends/*.cpp"
+file(GLOB_RECURSE CORE_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/core/*.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/backends/trt/*.cpp"
 )
 
-add_library(gomang SHARED ${GOMANG_SOURCES})
+if(ENABLE_TENSORRT)
+    file(GLOB_RECURSE TRT_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/backends/trt/*.cpp")
+endif()
+
+add_library(gomang SHARED
+        ${CORE_SOURCES}
+        ${TRT_SOURCES}
+)
 
 target_include_directories(gomang
         PUBLIC
@@ -14,14 +19,16 @@ target_include_directories(gomang
 
 set_target_properties(gomang PROPERTIES
         VERSION 1.0.0
+        SOVERSION 1
 )
 
-find_package(CUDAToolkit REQUIRED)
-find_library(TENSORRT_LIBRARY nvinfer)
+if(ENABLE_TENSORRT)
+    find_package(CUDAToolkit REQUIRED)
+    find_library(TENSORRT_LIBRARY nvinfer)
 
-target_link_libraries(gomang
-        PUBLIC
-        ${TENSORRT_LIBRARY}
-        CUDA::cudart
-        CUDA::cuda_driver
-)
+    target_link_libraries(gomang PUBLIC
+            ${TENSORRT_LIBRARY}
+            CUDA::cudart
+            CUDA::cuda_driver
+    )
+endif()

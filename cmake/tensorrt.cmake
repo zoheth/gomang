@@ -1,42 +1,53 @@
-set(CUDA_DIR "" CACHE PATH "If build tensorrt backend, need to define path of cuda library.")
-set(TensorRT_DIR "" CACHE PATH "If build tensorrt backend, need to define path of tensorrt library.")
+set(CUDA_DIR "" CACHE PATH
+        "Path to CUDA installation directory (required for TensorRT backend)")
+set(TensorRT_DIR "" CACHE PATH
+        "Path to TensorRT installation directory (required for TensorRT backend)")
 
 if(NOT CUDA_DIR)
     set(CUDA_DIR "/usr/local/cuda")
-    message(STATUS "CUDA_DIR is not defined, use default dir: ${CUDA_DIR}")
+    message(STATUS "[gomang] Using default CUDA directory: ${CUDA_DIR}")
 else()
-    message(STATUS "custom CUDA_DIR is defined as: ${CUDA_DIR}")
+    message(STATUS "[gomang] Using custom CUDA directory: ${CUDA_DIR}")
 endif()
 
 if(NOT TensorRT_DIR)
     set(TensorRT_DIR "/usr/src/tensorrt")
-    message(STATUS "TensorRT_DIR is not defined, use default dir: ${TensorRT_DIR}")
+    message(STATUS "[gomang] Using default TensorRT directory: ${TensorRT_DIR}")
 else()
-    message(STATUS "custom TensorRT_DIR is defined as: ${TensorRT_DIR}")
+    message(STATUS "[gomang] Using custom TensorRT directory: ${TensorRT_DIR}")
 endif()
 
 if(NOT EXISTS ${CUDA_DIR})
-    message(FATAL_ERROR "[Lite.AI.Toolkit][E] ${CUDA_DIR} is not exists! Please define -DCUDA_DIR=xxx while TensorRT Backend is enabled.")
+    message(FATAL_ERROR
+            "[gomang] CUDA directory not found: ${CUDA_DIR}\n"
+            "Please specify correct path using -DCUDA_DIR=<path>")
 endif()
 
 if(NOT EXISTS ${TensorRT_DIR})
-    message(FATAL_ERROR "[Lite.AI.Toolkit][E] ${TensorRT_DIR} is not exists! Please define -DTensorRT_DIR=xxx while TensorRT Backend is enabled.")
+    message(FATAL_ERROR
+            "[gomang] TensorRT directory not found: ${TensorRT_DIR}\n"
+            "Please specify correct path using -DTensorRT_DIR=<path>")
 endif()
 
-execute_process(COMMAND sh -c "nm -D libnvinfer.so | grep tensorrt_version"
-                WORKING_DIRECTORY /usr/lib/x86_64-linux-gnu
-                RESULT_VARIABLE result
-                OUTPUT_VARIABLE curr_out
-                ERROR_VARIABLE  curr_out)
+execute_process(
+        COMMAND sh -c "nm -D libnvinfer.so | grep tensorrt_version"
+        WORKING_DIRECTORY /usr/lib/x86_64-linux-gnu
+        RESULT_VARIABLE TENSORRT_VERSION_RESULT
+        OUTPUT_VARIABLE TENSORRT_VERSION_OUTPUT
+        ERROR_VARIABLE  TENSORRT_VERSION_ERROR
+)
 
-string(STRIP ${curr_out} TensorRT_Version)
-set(TensorRT_Version ${TensorRT_Version} CACHE STRING "TensorRT version" FORCE)
+if(TENSORRT_VERSION_RESULT EQUAL 0)
+    string(STRIP "${TENSORRT_VERSION_OUTPUT}" TensorRT_Version)
+    set(TensorRT_Version ${TensorRT_Version} CACHE STRING "TensorRT version" FORCE)
+    message(STATUS "[gomang] Detected TensorRT version: ${TensorRT_Version}")
+else()
+    message(WARNING "[gomang] Failed to detect TensorRT version: ${TENSORRT_VERSION_ERROR}")
+endif()
 
-include_directories(${CUDA_DIR}/include)
+include_directories(
+        ${CUDA_DIR}/include
+        ${TensorRT_DIR}/include
+)
+
 link_directories(${CUDA_DIR}/lib64)
-
-include_directories(${TensorRT_DIR}/include)
-# link_directories(${TensorRT_DIR}/lib)
-
-file(GLOB TENSORRT_CORE_SRCS ${CMAKE_SOURCE_DIR}/src/backend/trt/*.cpp)
-file(GLOB TENSORRT_CORE_HEAD ${CMAKE_SOURCE_DIR}/src/backend/trt/*.h)

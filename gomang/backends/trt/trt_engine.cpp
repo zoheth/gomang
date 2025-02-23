@@ -3,6 +3,7 @@
 #include <chrono>
 #include <fstream>
 #include <iostream>
+#include <cuda_runtime.h>
 
 TrtEngine::TrtEngine(const std::string &trt_model_path, unsigned int num_threads): log_id(trt_model_path.data()),
                                                                                      num_threads_(num_threads), trt_model_path_(trt_model_path.data()) {
