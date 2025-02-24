@@ -1,6 +1,7 @@
 #include "mnn_engine.h"
 
 #include <chrono>
+#include <cstring>
 #include <iostream>
 
 namespace gomang
@@ -9,6 +10,30 @@ MnnEngine::MnnEngine(const std::string &model_path, unsigned int num_threads) :
     IEngine(model_path, num_threads, "MNN")
 {
 	initHandler();
+
+	TensorDesc input_desc;
+	input_desc.shape     = {input_batch_, input_channel_, input_height_, input_width_};
+	input_desc.data_type = DataType::kFLOAT32;
+	input_desc.layout    = MemoryLayout::kNCHW;
+	input_desc.mem_type  = MemoryType::kCPU_PINNED;
+	input_desc.name      = "input";
+	input_info_.push_back(input_desc);
+
+	auto output_map = mnn_interpreter_->getSessionOutputAll(mnn_session_);
+
+	for (auto &it : output_map)
+	{
+		auto       tensor = it.second;
+		TensorDesc desc;
+		auto shape = tensor->shape();
+		desc.shape     = std::vector<int64_t>(shape.begin(), shape.end());
+		desc.data_type = DataType::kFLOAT32;
+		desc.layout    = MemoryLayout::kNCHW;
+		desc.mem_type  = MemoryType::kCPU_PINNED;
+		desc.name      = it.first;
+
+		output_info_.push_back(desc);
+	}
 }
 
 MnnEngine::~MnnEngine()
@@ -26,44 +51,28 @@ bool MnnEngine::infer(const std::vector<const void *> &inputs, const std::vector
 		std::cerr << "MNN interpreter or session not initialized!" << std::endl;
 		return false;
 	}
+	memcpy(input_tensor_->host<float>(), inputs[0], input_tensor_->size());
 
-	for (int i = 0; i < input_tensor_->elementSize(); ++i)
-	{
-		input_tensor_->host<float>()[i] = static_cast<const float *>(inputs[0])[i];
-	}
 	mnn_interpreter_->runSession(mnn_session_);
+
+	for (int i = 0; i < output_info_.size(); ++i)
+	{
+		auto tensor = mnn_interpreter_->getSessionOutput(mnn_session_, output_info_[i].name.c_str());
+		if (tensor->size() == output_info_[i].calculateSize())
+		{
+			memcpy(outputs[i], tensor->host<float>(), tensor->size());
+		}
+	}
 
 	return true;
 }
 std::vector<TensorDesc> MnnEngine::getInputInfo() const
 {
-	TensorDesc desc;
-	desc.shape     = {input_batch_, input_channel_, input_height_, input_width_};
-	desc.data_type = DataType::kFLOAT16;
-	desc.layout    = MemoryLayout::kNHWC;
-	desc.mem_type  = MemoryType::kCPU_PINNED;
-	desc.name      = "input";
-
-	return {desc};
+	return input_info_;
 }
 std::vector<TensorDesc> MnnEngine::getOutputInfo() const
 {
-	std::vector<TensorDesc> res;
-	auto                    output_map = mnn_interpreter_->getSessionOutputAll(mnn_session_);
-
-	for (auto &it : output_map)
-	{
-		auto       tensor = it.second;
-		TensorDesc desc;
-		desc.shape     = {tensor->batch(), tensor->channel(), tensor->height(), tensor->width()};
-		desc.data_type = DataType::kFLOAT16;
-		desc.layout    = MemoryLayout::kNHWC;
-		desc.mem_type  = MemoryType::kCPU_PINNED;
-		desc.name      = it.first;
-
-		res.push_back(desc);
-	}
-	return res;
+	return output_info_;
 }
 
 void MnnEngine::initHandler()
@@ -101,8 +110,6 @@ void MnnEngine::initHandler()
 	{
 		// do nothing
 	}
-
-	num_outputs_ = static_cast<int>(mnn_interpreter_->getSessionOutputAll(mnn_session_).size());
 }
 
 }        // namespace gomang

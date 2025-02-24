@@ -3,6 +3,7 @@
 #include <MNN/Interpreter.hpp>
 #include <MNN/MNNDefine.h>
 #include <MNN/Tensor.hpp>
+#include <MNN/ImageProcess.hpp>
 
 #include "core/engine.h"
 
@@ -25,7 +26,7 @@ class MnnEngine : public IEngine
 	MNN::Session                     *mnn_session_{nullptr};
 	MNN::Tensor                      *input_tensor_{nullptr};        // assume single input.
 	MNN::ScheduleConfig               schedule_config_;
-	// std::shared_ptr<MNN::CV::ImageProcess> pretreat_; // init at subclass
+	std::shared_ptr<MNN::CV::ImageProcess> pretreat_; // init at subclass
 
 	const unsigned int num_threads_{};        // initialize at runtime.
 	int                input_batch_{};
@@ -33,7 +34,9 @@ class MnnEngine : public IEngine
 	int                input_height_{};
 	int                input_width_{};
 	int                dimension_type_{};
-	int                num_outputs_{1};
+
+	std::vector<TensorDesc> input_info_;
+	std::vector<TensorDesc> output_info_;
 
   private:
 	void initHandler();

@@ -11,10 +11,15 @@ if (ENABLE_MNN)
     file(GLOB_RECURSE MNN_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/backends/mnn/*.cpp")
 endif ()
 
+if (ENABLE_NCNN)
+    file(GLOB_RECURSE NCNN_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/backends/ncnn/*.cpp")
+endif ()
+
 add_library(gomang SHARED
         ${CORE_SOURCES}
         ${TRT_SOURCES}
         ${MNN_SOURCES}
+        ${NCNN_SOURCES}
 )
 
 target_include_directories(gomang
@@ -41,4 +46,8 @@ endif ()
 
 if (ENABLE_MNN)
     target_link_libraries(gomang PUBLIC MNN)
+endif ()
+
+if (ENABLE_NCNN)
+    target_link_libraries(gomang PUBLIC ncnn)
 endif ()

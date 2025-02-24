@@ -42,7 +42,7 @@ if (ENABLE_NCNN)
 
     set(NCNN_INCLUDE_DIR ${NCNN_ROOT}/include)
 
-    et(NCNN_LIBRARY_DIR ${NCNN_ROOT}/lib)
+    set(NCNN_LIBRARY_DIR ${NCNN_ROOT}/lib)
 
     find_library(NCNN_LIBRARY
             NAMES ncnn libncnn

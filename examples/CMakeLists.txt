@@ -10,16 +10,23 @@ target_include_directories(test_common
         ${CMAKE_SOURCE_DIR}/gomang
 )
 
-if(ENABLE_TENSORRT)
+if (ENABLE_TENSORRT)
     target_compile_definitions(test_common
             PUBLIC
             ENABLE_TENSORRT
     )
-endif()
+endif ()
 
-if(ENABLE_MNN)
+if (ENABLE_MNN)
     target_compile_definitions(test_common
             PUBLIC
             ENABLE_MNN
+    )
+endif ()
+
+if (ENABLE_NCNN)
+    target_compile_definitions(test_common
+            PUBLIC
+            ENABLE_NCNN
     )
 endif ()
