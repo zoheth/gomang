@@ -3,10 +3,12 @@
 #include <chrono>
 #include <iostream>
 
-MnnEngine::MnnEngine(const std::string &mnn_path, unsigned int num_threads) :
-    log_id_(mnn_path.data()), mnn_path_(mnn_path.data()), num_threads_(num_threads)
+namespace gomang
 {
-	init_handler();
+MnnEngine::MnnEngine(const std::string &model_path, unsigned int num_threads) :
+    IEngine(model_path, num_threads, "MNN")
+{
+	initHandler();
 }
 
 MnnEngine::~MnnEngine()
@@ -17,8 +19,7 @@ MnnEngine::~MnnEngine()
 		mnn_interpreter_->releaseSession(mnn_session_);
 	}
 }
-
-bool MnnEngine::benchmark(int num_warmup, int num_infer)
+bool MnnEngine::infer(const std::vector<const void *> &inputs, const std::vector<void *> &outputs)
 {
 	if (!mnn_interpreter_ || !mnn_session_)
 	{
@@ -26,34 +27,48 @@ bool MnnEngine::benchmark(int num_warmup, int num_infer)
 		return false;
 	}
 
-	std::cout << "Warmup..." << std::endl;
-	for (int i = 0; i < num_warmup; ++i)
+	for (int i = 0; i < input_tensor_->elementSize(); ++i)
 	{
-		prepare_fake_input();
-		mnn_interpreter_->runSession(mnn_session_);
+		input_tensor_->host<float>()[i] = static_cast<const float *>(inputs[0])[i];
 	}
-
-	std::cout << "Benchmarking..." << std::endl;
-	auto start = std::chrono::high_resolution_clock::now();
-
-	for (int i = 0; i < num_infer; ++i)
-	{
-		prepare_fake_input();
-		mnn_interpreter_->runSession(mnn_session_);
-	}
-
-	auto end = std::chrono::high_resolution_clock::now();
-	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-
-	float avg_time = duration.count() / 1000.0f / num_infer;
-	std::cout << "Average inference time: " << avg_time << " ms" << std::endl;
-	std::cout << "FPS: " << 1000.0f / avg_time << std::endl;
+	mnn_interpreter_->runSession(mnn_session_);
 
 	return true;
 }
-void MnnEngine::init_handler()
+std::vector<TensorDesc> MnnEngine::getInputInfo() const
 {
-	mnn_interpreter_ = std::shared_ptr<MNN::Interpreter>(MNN::Interpreter::createFromFile(mnn_path_));
+	TensorDesc desc;
+	desc.shape     = {input_batch_, input_channel_, input_height_, input_width_};
+	desc.data_type = DataType::kFLOAT16;
+	desc.layout    = MemoryLayout::kNHWC;
+	desc.mem_type  = MemoryType::kCPU_PINNED;
+	desc.name      = "input";
+
+	return {desc};
+}
+std::vector<TensorDesc> MnnEngine::getOutputInfo() const
+{
+	std::vector<TensorDesc> res;
+	auto                    output_map = mnn_interpreter_->getSessionOutputAll(mnn_session_);
+
+	for (auto &it : output_map)
+	{
+		auto       tensor = it.second;
+		TensorDesc desc;
+		desc.shape     = {tensor->batch(), tensor->channel(), tensor->height(), tensor->width()};
+		desc.data_type = DataType::kFLOAT16;
+		desc.layout    = MemoryLayout::kNHWC;
+		desc.mem_type  = MemoryType::kCPU_PINNED;
+		desc.name      = it.first;
+
+		res.push_back(desc);
+	}
+	return res;
+}
+
+void MnnEngine::initHandler()
+{
+	mnn_interpreter_ = std::shared_ptr<MNN::Interpreter>(MNN::Interpreter::createFromFile(model_path_.c_str()));
 
 	schedule_config_.numThread = static_cast<int>(num_threads_);
 	MNN::BackendConfig backend_config;
@@ -88,37 +103,6 @@ void MnnEngine::init_handler()
 	}
 
 	num_outputs_ = static_cast<int>(mnn_interpreter_->getSessionOutputAll(mnn_session_).size());
+}
 
-	print_debug_string();
-}
-void MnnEngine::print_debug_string()
-{
-	std::cout << "LITEMNN_DEBUG LogId: " << log_id_ << "\n";
-	std::cout << "=============== Input-Dims ==============\n";
-	if (input_tensor_)
-		input_tensor_->printShape();
-	if (dimension_type_ == MNN::Tensor::CAFFE)
-		std::cout << "Dimension Type: (CAFFE/PyTorch/ONNX)NCHW" << "\n";
-	else if (dimension_type_ == MNN::Tensor::TENSORFLOW)
-		std::cout << "Dimension Type: (TENSORFLOW)NHWC" << "\n";
-	else if (dimension_type_ == MNN::Tensor::CAFFE_C4)
-		std::cout << "Dimension Type: (CAFFE_C4)NC4HW4" << "\n";
-	std::cout << "=============== Output-Dims ==============\n";
-	auto tmp_output_map = mnn_interpreter_->getSessionOutputAll(mnn_session_);
-	std::cout << "getSessionOutputAll done!\n";
-	for (auto it = tmp_output_map.cbegin(); it != tmp_output_map.cend(); ++it)
-	{
-		std::cout << "Output: " << it->first << ": ";
-		it->second->printShape();
-	}
-	std::cout << "========================================\n";
-}
-void MnnEngine::prepare_fake_input()
-{
-	const float fill_value = 0.5f;
-
-	for (int i=0; i<input_tensor_->elementSize(); ++i)
-	{
-		input_tensor_->host<float>()[i] = fill_value;
-	}
-}
+}        // namespace gomang

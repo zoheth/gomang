@@ -11,14 +11,19 @@
 int main()
 {
 #ifdef ENABLE_TENSORRT
-	auto trt_engine = std::make_shared<gomang::TrtEngine>("models/yolov5s_fp32.engine");
-	auto trt_bench  = gomang::Benchmark(trt_engine);
-	trt_bench.run();
+	{
+		auto engine = std::make_shared<gomang::TrtEngine>("models/yolov5s_fp32.engine");
+		auto bench  = gomang::Benchmark(engine);
+		bench.run();
+	}
 #endif
 
 #ifdef ENABLE_MNN
-	MnnEngine mnn_engine("models/yolov5s.mnn");
-	mnn_engine.benchmark(2, 5);
+	{
+		auto engine = std::make_shared<gomang::MnnEngine>("models/yolov5s.mnn");
+		auto bench  = gomang::Benchmark(engine);
+		bench.run(2, 5);
+	}
 #endif
 
 	return 0;

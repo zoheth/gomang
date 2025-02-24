@@ -10,24 +10,25 @@ namespace gomang
 struct TensorDesc
 {
 	std::vector<int64_t> shape;
-	DataType         data_type;
-	MemoryLayout     layout;
-	MemoryType       mem_type;
-	size_t           alignment{64};
-	std::string      name;
+	DataType             data_type;
+	MemoryLayout         layout;
+	MemoryType           mem_type;
+	size_t               alignment{64};
+	std::string          name;
 
-	size_t getElementsCount() const;
-	size_t calculateSize() const;
+	[[nodiscard]] size_t getElementsCount() const;
+	[[nodiscard]] size_t calculateSize() const;
+	void print() const;
 };
 
 class ITensor
 {
   public:
-	virtual void             *data()       = 0;
-	virtual const void       *data() const = 0;
-	virtual const TensorDesc &desc() const = 0;
-	virtual size_t            size() const = 0;
-	virtual ~ITensor()                     = default;
+	virtual void                           *data()       = 0;
+	[[nodiscard]] virtual const void       *data() const = 0;
+	[[nodiscard]] virtual const TensorDesc &desc() const = 0;
+	[[nodiscard]] virtual size_t            size() const = 0;
+	virtual ~ITensor()                                   = default;
 };
 
 class Tensor : public ITensor
@@ -37,10 +38,10 @@ class Tensor : public ITensor
 
 	~Tensor() override;
 
-	const void       *data() const override;
-	void             *data() override;
-	const TensorDesc &desc() const override;
-	size_t            size() const override;
+	[[nodiscard]] const void       *data() const override;
+	void                           *data() override;
+	[[nodiscard]] const TensorDesc &desc() const override;
+	[[nodiscard]] size_t            size() const override;
 
   private:
 	TensorDesc desc_;

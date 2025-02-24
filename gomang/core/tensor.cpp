@@ -1,5 +1,6 @@
 #include "tensor.h"
 
+#include <iostream>
 #include <numeric>
 #include <utility>
 
@@ -39,6 +40,22 @@ size_t TensorDesc::calculateSize() const
 	size_t total_size = num_elements * element_size;
 	return (total_size + alignment - 1) & ~(alignment - 1);
 }
+void TensorDesc::print() const
+{
+	std::cout << "Tensor: " << name
+	          << " | Shape: [";
+	for (size_t i = 0; i < shape.size(); ++i)
+	{
+		std::cout << shape[i];
+		if (i < shape.size() - 1)
+			std::cout << ",";
+	}
+	std::cout << "] | " << getDataTypeName(data_type)
+	          // << " | Layout: " << getMemoryLayoutName(layout)
+	          << " | " << getMemoryTypeName(mem_type)
+	          << std::endl;
+}
+
 Tensor::Tensor(TensorDesc desc, IMemoryAllocator *allocator) :
     desc_(std::move(desc)), allocator_(allocator)
 {

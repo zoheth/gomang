@@ -31,18 +31,11 @@ class TrtEngine : public IEngine
 
 	~TrtEngine() override;
 
-	TrtEngine(const TrtEngine &)            = delete;
-	TrtEngine(TrtEngine &&)                 = delete;
-	TrtEngine &operator=(const TrtEngine &) = delete;
-	TrtEngine &operator=(TrtEngine &&)      = delete;
-
 	bool infer(const std::vector<const void *> &inputs, const std::vector<void *> &outputs) override;
 
-	IMemoryAllocator *getAllocator() override;
+	[[nodiscard]] std::vector<TensorDesc> getInputInfo() const override;
 
-	std::vector<TensorDesc> getInputInfo() const override;
-
-	std::vector<TensorDesc> getOutputInfo() const override;
+	[[nodiscard]] std::vector<TensorDesc> getOutputInfo() const override;
 
   protected:
 	std::unique_ptr<nvinfer1::IRuntime>          trt_runtime_;

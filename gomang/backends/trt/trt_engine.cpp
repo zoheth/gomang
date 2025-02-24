@@ -48,7 +48,7 @@ void TrtAllocator::deallocate(void *ptr, MemoryType type)
 }
 
 TrtEngine::TrtEngine(const std::string &model_path, unsigned int num_threads) :
-    IEngine(model_path, num_threads)
+    IEngine(model_path, num_threads, "TensorRT")
 {
 	initHandler();
 }
@@ -91,10 +91,7 @@ bool TrtEngine::infer(const std::vector<const void *> &inputs, const std::vector
 	cudaStreamSynchronize(stream_);
 	return true;
 }
-IMemoryAllocator *TrtEngine::getAllocator()
-{
-	return &allocator_;
-}
+
 std::vector<TensorDesc> TrtEngine::getInputInfo() const
 {
 	std::vector<TensorDesc> res;
