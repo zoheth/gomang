@@ -14,7 +14,7 @@ MnnEngine::MnnEngine(const std::string &model_path, unsigned int num_threads) :
 	TensorDesc input_desc;
 	input_desc.shape     = {input_batch_, input_channel_, input_height_, input_width_};
 	input_desc.data_type = DataType::kFLOAT32;
-	input_desc.layout    = MemoryLayout::kNCHW;
+	input_desc.layout    = MemoryLayout::kNC4HW4;
 	input_desc.mem_type  = MemoryType::kCPU_PINNED;
 	input_desc.name      = "input";
 	input_info_.push_back(input_desc);
@@ -25,12 +25,12 @@ MnnEngine::MnnEngine(const std::string &model_path, unsigned int num_threads) :
 	{
 		auto       tensor = it.second;
 		TensorDesc desc;
-		auto shape = tensor->shape();
-		desc.shape     = std::vector<int64_t>(shape.begin(), shape.end());
-		desc.data_type = DataType::kFLOAT32;
-		desc.layout    = MemoryLayout::kNCHW;
-		desc.mem_type  = MemoryType::kCPU_PINNED;
-		desc.name      = it.first;
+		auto       shape = tensor->shape();
+		desc.shape       = std::vector<int64_t>(shape.begin(), shape.end());
+		desc.data_type   = DataType::kFLOAT32;
+		desc.layout      = MemoryLayout::kNC4HW4;
+		desc.mem_type    = MemoryType::kCPU_PINNED;
+		desc.name        = it.first;
 
 		output_info_.push_back(desc);
 	}
@@ -51,7 +51,17 @@ bool MnnEngine::infer(const std::vector<const void *> &inputs, const std::vector
 		std::cerr << "MNN interpreter or session not initialized!" << std::endl;
 		return false;
 	}
-	memcpy(input_tensor_->host<float>(), inputs[0], input_tensor_->size());
+	if (void *inputPtr = input_tensor_->map(MNN::Tensor::MAP_TENSOR_WRITE, input_tensor_->getDimensionType()))
+	{
+		memcpy(inputPtr, inputs[0], input_info_[0].calculateSize());
+		input_tensor_->unmap(MNN::Tensor::MAP_TENSOR_WRITE, input_tensor_->getDimensionType(), inputPtr);
+	}
+	else
+	{
+		std::cerr << "Failed to map input tensor!" << std::endl;
+		return false;
+	}
+	input_tensor_->wait(MNN::Tensor::MAP_TENSOR_WRITE, true);
 
 	mnn_interpreter_->runSession(mnn_session_);
 
@@ -60,7 +70,23 @@ bool MnnEngine::infer(const std::vector<const void *> &inputs, const std::vector
 		auto tensor = mnn_interpreter_->getSessionOutput(mnn_session_, output_info_[i].name.c_str());
 		if (tensor->size() == output_info_[i].calculateSize())
 		{
-			memcpy(outputs[i], tensor->host<float>(), tensor->size());
+			void *outputPtr = tensor->map(MNN::Tensor::MAP_TENSOR_READ, tensor->getDimensionType());
+			if (outputPtr)
+			{
+				memcpy(outputs[i], outputPtr, tensor->size());
+				tensor->unmap(MNN::Tensor::MAP_TENSOR_READ, tensor->getDimensionType(), outputPtr);
+			}
+			else
+			{
+				std::cerr << "Failed to map output tensor! [" << i << "]" << std::endl;
+				return false;
+			}
+		}
+		else
+		{
+			std::cout << "Output tensor size mismatch! [" << i << "]" << std::endl;
+			std::cout << "Expected: " << output_info_[i].calculateSize() << " | Got: " << tensor->size() << std::endl;
+			return false;
 		}
 	}
 
@@ -82,7 +108,9 @@ void MnnEngine::initHandler()
 	schedule_config_.numThread = static_cast<int>(num_threads_);
 	MNN::BackendConfig backend_config;
 	backend_config.precision       = MNN::BackendConfig::Precision_High;
+	backend_config.memory          = MNN::BackendConfig::Memory_High;
 	schedule_config_.backendConfig = &backend_config;
+	schedule_config_.type          = MNN_FORWARD_CUDA;
 
 	mnn_session_ = mnn_interpreter_->createSession(schedule_config_);
 

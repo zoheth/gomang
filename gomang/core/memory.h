@@ -5,7 +5,8 @@ namespace gomang
 enum class MemoryLayout
 {
 	kNHWC,
-	kNCHW
+	kNCHW,
+	kNC4HW4
 };
 
 enum class MemoryType

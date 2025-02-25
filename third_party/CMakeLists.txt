@@ -7,11 +7,13 @@ if (ENABLE_MNN)
 
     set(MNN_INCLUDE_DIR ${MNN_ROOT}/include)
 
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(MNN_LIBRARY_DIR ${MNN_ROOT}/lib/Debug)
-    else()
-        set(MNN_LIBRARY_DIR ${MNN_ROOT}/lib/Release)
-    endif()
+#    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+#        set(MNN_LIBRARY_DIR ${MNN_ROOT}/lib/Debug)
+#    else()
+#        set(MNN_LIBRARY_DIR ${MNN_ROOT}/lib/Release)
+#    endif()
+
+    set(MNN_LIBRARY_DIR ${MNN_ROOT}/lib)
 
     find_library(MNN_LIBRARY
             NAMES MNN libMNN

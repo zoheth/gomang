@@ -3,6 +3,44 @@
 namespace gomang
 {
 
+namespace
+{
+void printSimpleOutputCheck(const std::vector<std::vector<float>>& output_buffers, int sample_count = 5) {
+	std::cout << "=== Output Check ===" << std::endl;
+
+	for (size_t i = 0; i < output_buffers.size(); ++i) {
+		const auto& buffer = output_buffers[i];
+		if (buffer.empty()) {
+			std::cout << "Buffer " << i << ": [Empty]" << std::endl;
+			continue;
+		}
+
+		// 找出最大值和最小值
+		float min_val = buffer[0];
+		float max_val = buffer[0];
+		for (const auto& val : buffer) {
+			if (val < min_val) min_val = val;
+			if (val > max_val) max_val = val;
+		}
+
+		// 输出基本信息
+		std::cout << "Buffer " << i << " (size: " << buffer.size()
+				  << ", min: " << min_val << ", max: " << max_val << ")" << std::endl;
+
+		// 输出开头的几个值
+		std::cout << "  Front values: ";
+		int count = std::min(sample_count, static_cast<int>(buffer.size()));
+		for (int j = 0; j < count; ++j) {
+			std::cout << buffer[j];
+			if (j < count - 1) std::cout << ", ";
+		}
+		std::cout << std::endl;
+	}
+
+	std::cout << "===================" << std::endl;
+}
+}
+
 void Benchmark::run(int num_warmup, int num_infer) const
 {
 	std::cout << std::endl
@@ -10,7 +48,7 @@ void Benchmark::run(int num_warmup, int num_infer) const
 	engine_->printTensorInfo();
 
 	auto               input_info = engine_->getInputInfo();
-	std::vector<float> input_data(input_info[0].getElementsCount());
+	std::vector<float> input_data(input_info[0].getElementsCount(), 0.f);
 
 	std::vector<void *>             outputs;
 	std::vector<std::vector<float>> output_buffers;
@@ -38,6 +76,8 @@ void Benchmark::run(int num_warmup, int num_infer) const
 
 	auto end      = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+	printSimpleOutputCheck(output_buffers);
 
 	float avg_time = duration.count() / 1000.0f / num_infer;
 	std::cout << "Average inference time: " << avg_time << " ms" << std::endl;
