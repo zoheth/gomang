@@ -48,7 +48,7 @@ if(ENABLE_IREE)
             # Specific HAL drivers you enabled
             iree::hal::drivers::vulkan
 
-            iree::runtime  # 主运行时库
+            iree::runtime
             iree::modules::hal
     )
 endif ()
