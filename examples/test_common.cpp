@@ -23,7 +23,7 @@ int main()
 	    "SR_edsr",
 	    "SR_msrresnet_x4_psnr",
 	    "ST_mosaic_d"};
-	std::string model_name = model_names[3];
+	std::string model_name = model_names[4];
 
 	std::cout << "Benchmarking " << model_name << " model" << std::endl;
 
@@ -31,15 +31,15 @@ int main()
 	{
 		auto engine = std::make_shared<gomang::TrtEngine>("models/trt/" + model_name + ".engine");
 		auto bench  = gomang::Benchmark(engine);
-		bench.run();
+		bench.run(0, 1);
 	}
 #endif
 
 #ifdef ENABLE_MNN
 	{
-		auto engine = std::make_shared<gomang::MnnEngine>("models/mnn/" + model_name + ".mnn");
+		auto engine = std::make_shared<gomang::MnnEngine>("models/mnn/" + model_name + ".mnn", 8);
 		auto bench  = gomang::Benchmark(engine);
-		bench.run();
+		bench.run(2,10);
 	}
 #endif
 
@@ -51,7 +51,7 @@ int main()
 		input_desc.layout    = gomang::MemoryLayout::kNCHW;
 		input_desc.mem_type  = gomang::MemoryType::kCPU_PINNED;
 
-		auto engine = std::make_shared<gomang::NcnnEngine>("models/ncnn/" + model_name + ".ncnn", input_desc);
+		auto engine = std::make_shared<gomang::NcnnEngine>("models/ncnn/" + model_name + ".ncnn", input_desc, 8);
 		// auto engine = std::make_shared<gomang::NcnnEngine>("models/nanodet_m-opt");
 		auto bench = gomang::Benchmark(engine);
 		bench.run(0, 1);

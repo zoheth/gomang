@@ -61,7 +61,6 @@ bool MnnEngine::infer(const std::vector<const void *> &inputs, const std::vector
 		std::cerr << "Failed to map input tensor!" << std::endl;
 		return false;
 	}
-	input_tensor_->wait(MNN::Tensor::MAP_TENSOR_WRITE, true);
 
 	mnn_interpreter_->runSession(mnn_session_);
 

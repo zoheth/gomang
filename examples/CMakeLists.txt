@@ -30,3 +30,9 @@ if (ENABLE_NCNN)
             ENABLE_NCNN
     )
 endif ()
+
+add_executable(test_iree iree_test.cpp)
+target_link_libraries(test_iree
+        PRIVATE
+        gomang
+)

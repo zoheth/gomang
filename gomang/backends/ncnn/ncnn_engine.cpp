@@ -81,7 +81,7 @@ void NcnnEngine::initHandler()
 {
 	net_                          = std::make_unique<ncnn::Net>();
 	net_->opt.num_threads         = static_cast<int>(num_threads_);
-	net_->opt.use_vulkan_compute  = false;
+	net_->opt.use_vulkan_compute  = true;
 	net_->opt.use_fp16_arithmetic = false;
 
 	net_->load_param(param_path_.c_str());
