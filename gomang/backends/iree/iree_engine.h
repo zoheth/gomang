@@ -1,6 +1,11 @@
 #pragma once
 
-#include <iree/runtime/api.h>
+#include "iree/base/api.h"
+#include "iree/hal/api.h"
+#include "iree/hal/drivers/local_task/registration/driver_module.h"
+#include "iree/modules/hal/module.h"
+#include "iree/vm/api.h"
+#include "iree/vm/bytecode/module.h"
 
 #include "core/engine.h"
 
@@ -9,7 +14,7 @@ namespace gomang
 class IreeEngine : public IEngine
 {
   public:
-	IreeEngine(std::string model_path, unsigned int num_threads = 1);
+	IreeEngine(std::string model_path, const TensorDesc& input_desc, unsigned int num_threads = 1);
 	~IreeEngine() override;
 	bool infer(
 	    const std::vector<const void *> &inputs,
@@ -19,25 +24,29 @@ class IreeEngine : public IEngine
 	[[nodiscard]] std::vector<TensorDesc> getOutputInfo() const override;
 
   private:
-	iree_runtime_instance_t *instance_ = nullptr;
-	iree_runtime_session_t  *session_  = nullptr;
-	iree_hal_device_t       *device_   = nullptr;
+	iree_vm_instance_t* instance_{nullptr};
+	iree_hal_device_t* device_{nullptr};
+	iree_vm_context_t* context_{nullptr};
+	iree_vm_function_t main_function_{};
 
 	mutable std::vector<TensorDesc> input_descs_;
 	mutable std::vector<TensorDesc> output_descs_;
 
-	iree_status_t initializeIree();
-	iree_status_t loadModule();
-	void          cleanupIree();
+	iree_const_byte_span_t module_data_{};
 
-	static iree_hal_element_type_t convertToIreeElementType(DataType type);
-	static DataType                convertFromIreeElementType(iree_hal_element_type_t type);
+	bool initialize();
 
-	iree_status_t createBufferView(
-	    const void              *data,
-	    const TensorDesc        &desc,
-	    iree_hal_buffer_view_t **out_buffer_view);
+	iree_status_t createDevice(iree_allocator_t host_allocator);
+	iree_const_byte_span_t loadBytecodeModule();
 
-	iree_status_t extractModelInfo();
+
+
+	bool runInference(const void* input_data,
+		      void* output_data,
+		      bool detect_output = false);
+
+	iree_hal_element_type_t convertDataTypeToIree(DataType data_type) const;
+
+	bool detectOutputInfo();
 };
 }        // namespace gomang

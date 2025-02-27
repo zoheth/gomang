@@ -2,6 +2,10 @@
 
 #include <filesystem>
 
+#include "D_dncnn_color_blind.h"
+#include "SR_msrresnet_x4_psnr.h"
+#include "SR_edsr.h"
+
 namespace gomang
 {
 
@@ -19,137 +23,35 @@ inline iree_hal_buffer_params_t createBufferParams(
 	return params;
 }
 
-IreeEngine::IreeEngine(std::string model_path, unsigned int num_threads) :
-    IEngine(std::move(model_path), num_threads, "IREE")
+IreeEngine::IreeEngine(std::string model_path, const TensorDesc &input_desc, unsigned int num_threads) :
+    IEngine(std::move(model_path), num_threads, "iree")
 {
-	iree_status_t status = initializeIree();
-	if (!iree_status_is_ok(status)) {
-		char buffer[256];
-		iree_host_size_t actual_length = 0;
-		iree_status_format(status, sizeof(buffer), buffer, &actual_length);
-		iree_status_free(status);
-		throw std::runtime_error(std::string("Failed to initialize IREE: ") + buffer);
+	input_descs_.push_back(input_desc);
+	if (!initialize())
+	{
+		throw std::runtime_error("Failed to initialize IREE engine");
 	}
 
-	status = loadModule();
-	if (!iree_status_is_ok(status)) {
-		cleanupIree();
-		char buffer[256];
-		iree_host_size_t actual_length = 0;
-		iree_status_format(status, sizeof(buffer), buffer, &actual_length);
-		iree_status_free(status);
-		throw std::runtime_error(std::string("Failed to load model: ") + buffer);
-	}
-
-	status = extractModelInfo();
-	if (!iree_status_is_ok(status)) {
-		cleanupIree();
-		char buffer[256];
-		iree_host_size_t actual_length = 0;
-		iree_status_format(status, sizeof(buffer), buffer, &actual_length);
-		iree_status_free(status);
-		throw std::runtime_error(std::string("Failed to extract model info: ") + buffer);
+	if (!detectOutputInfo())
+	{
+		throw std::runtime_error("Failed to detect output information");
 	}
 }
+
 IreeEngine::~IreeEngine()
 {
-	cleanupIree();
+	iree_hal_device_release(device_);
+	iree_vm_context_release(context_);
+	iree_vm_instance_release(instance_);
 }
 bool IreeEngine::infer(const std::vector<const void *> &inputs, const std::vector<void *> &outputs)
 {
-	if (inputs.size() != input_descs_.size()) {
-        std::cerr << "Input count mismatch: expected " << input_descs_.size()
-                  << ", got " << inputs.size() << std::endl;
-        return false;
-    }
+	if (inputs.empty() || outputs.empty())
+	{
+		return false;
+	}
 
-    if (outputs.size() != output_descs_.size()) {
-        std::cerr << "Output count mismatch: expected " << output_descs_.size()
-                  << ", got " << outputs.size() << std::endl;
-        return false;
-    }
-
-    // Initialize the call to the main function
-    // Assuming "module.main" is the function name - adapt as needed for your models
-    iree_runtime_call_t call;
-    iree_status_t status = iree_runtime_call_initialize_by_name(
-        session_, iree_make_cstring_view("module.main"), &call);
-
-    if (!iree_status_is_ok(status)) {
-        std::cerr << "Failed to initialize function call" << std::endl;
-        iree_status_free(status);
-        return false;
-    }
-
-    // Add inputs to the call
-    for (size_t i = 0; i < inputs.size(); ++i) {
-        iree_hal_buffer_view_t* input_buffer_view = nullptr;
-        status = createBufferView(inputs[i], input_descs_[i], &input_buffer_view);
-
-        if (!iree_status_is_ok(status)) {
-            std::cerr << "Failed to create input buffer view for input " << i << std::endl;
-            iree_runtime_call_deinitialize(&call);
-            iree_status_free(status);
-            return false;
-        }
-
-        status = iree_runtime_call_inputs_push_back_buffer_view(&call, input_buffer_view);
-        iree_hal_buffer_view_release(input_buffer_view);
-
-        if (!iree_status_is_ok(status)) {
-            std::cerr << "Failed to push input buffer view for input " << i << std::endl;
-            iree_runtime_call_deinitialize(&call);
-            iree_status_free(status);
-            return false;
-        }
-    }
-
-    // Invoke the function
-    status = iree_runtime_call_invoke(&call, 0);
-    if (!iree_status_is_ok(status)) {
-        std::cerr << "Failed to invoke function" << std::endl;
-        iree_runtime_call_deinitialize(&call);
-        iree_status_free(status);
-        return false;
-    }
-
-    // Get outputs
-    for (size_t i = 0; i < outputs.size(); ++i) {
-        iree_hal_buffer_view_t* output_buffer_view = nullptr;
-        status = iree_runtime_call_outputs_pop_front_buffer_view(&call, &output_buffer_view);
-
-        if (!iree_status_is_ok(status)) {
-            std::cerr << "Failed to get output buffer view for output " << i << std::endl;
-            iree_runtime_call_deinitialize(&call);
-            iree_status_free(status);
-            return false;
-        }
-
-        // Copy data from the buffer view to the output buffer
-        const TensorDesc& desc = output_descs_[i];
-        size_t element_size = desc.getElementsCount();
-        size_t total_size = element_size;
-        for (const auto& dim : desc.shape) {
-            total_size *= dim;
-        }
-
-        iree_hal_buffer_t* buffer = iree_hal_buffer_view_buffer(output_buffer_view);
-        iree_device_size_t offset = 0;
-        iree_device_size_t length = total_size;
-
-        status = iree_hal_buffer_read_data(buffer, offset, outputs[i], length);
-        iree_hal_buffer_view_release(output_buffer_view);
-
-        if (!iree_status_is_ok(status)) {
-            std::cerr << "Failed to read output data for output " << i << std::endl;
-            iree_runtime_call_deinitialize(&call);
-            iree_status_free(status);
-            return false;
-        }
-    }
-
-    iree_runtime_call_deinitialize(&call);
-    return true;
+	return runInference(inputs[0], outputs[0], false);
 }
 std::vector<TensorDesc> IreeEngine::getInputInfo() const
 {
@@ -159,66 +61,187 @@ std::vector<TensorDesc> IreeEngine::getOutputInfo() const
 {
 	return output_descs_;
 }
-iree_status_t IreeEngine::initializeIree()
+bool IreeEngine::initialize()
 {
-	// Create the runtime instance
-	iree_runtime_instance_options_t instance_options;
-	iree_runtime_instance_options_initialize(&instance_options);
-	iree_runtime_instance_options_use_all_available_drivers(&instance_options);
+	IREE_CHECK_OK(iree_vm_instance_create(IREE_VM_TYPE_CAPACITY_DEFAULT,
+	                                      iree_allocator_system(), &instance_));
+	IREE_CHECK_OK(iree_hal_module_register_all_types(instance_));
 
-	// // Configure threading if needed
-	// if (num_threads_ > 0) {
-	// 	iree_runtime_instance_options_default_device_params(&instance_options)
-	// 		.task.worker_count = num_threads_;
-	// }
+	IREE_CHECK_OK(createDevice(iree_allocator_system()));
 
-	IREE_RETURN_IF_ERROR(iree_runtime_instance_create(
-		&instance_options, iree_allocator_system(), &instance_));
+	iree_vm_module_t *hal_module = nullptr;
+	IREE_CHECK_OK(iree_hal_module_create(
+	    instance_, 1, &device_, IREE_HAL_MODULE_FLAG_NONE,
+	    iree_hal_module_debug_sink_null(), iree_allocator_system(), &hal_module));
 
-	// Create the device
-	IREE_RETURN_IF_ERROR(iree_runtime_instance_try_create_default_device(
-		instance_, iree_make_cstring_view("local-task"), &device_));
+	module_data_ = loadBytecodeModule();
 
-	// Create the session
-	iree_runtime_session_options_t session_options;
-	iree_runtime_session_options_initialize(&session_options);
+	iree_vm_module_t *bytecode_module = nullptr;
+	IREE_CHECK_OK(iree_vm_bytecode_module_create(
+	    instance_, module_data_, iree_allocator_null(),
+	    iree_allocator_system(), &bytecode_module));
 
-	IREE_RETURN_IF_ERROR(iree_runtime_session_create_with_device(
-		instance_, &session_options, device_,
-		iree_runtime_instance_host_allocator(instance_), &session_));
+	iree_vm_module_t *modules[] = {hal_module, bytecode_module};
+	IREE_CHECK_OK(iree_vm_context_create_with_modules(
+	    instance_, IREE_VM_CONTEXT_FLAG_NONE, IREE_ARRAYSIZE(modules),
+	    &modules[0], iree_allocator_system(), &context_));
 
-	return iree_ok_status();
+	// Release module references now that the context holds them
+	iree_vm_module_release(hal_module);
+	iree_vm_module_release(bytecode_module);
+
+	const char kMainFunctionName[] = "module.main_graph";
+	IREE_CHECK_OK(iree_vm_context_resolve_function(
+	    context_, iree_make_cstring_view(kMainFunctionName), &main_function_));
+
+	return true;
 }
-iree_status_t IreeEngine::loadModule()
+iree_status_t IreeEngine::createDevice(iree_allocator_t host_allocator)
 {
-	if (!std::filesystem::exists(model_path_)) {
-		return iree_make_status(IREE_STATUS_NOT_FOUND,
-			"Model file not found: %s", model_path_.c_str());
+	// Register the local-task HAL driver
+	IREE_RETURN_IF_ERROR(iree_hal_local_task_driver_module_register(
+	    iree_hal_driver_registry_default()));
+
+	// Create driver
+	iree_hal_driver_t *driver     = nullptr;
+	iree_string_view_t identifier = iree_make_cstring_view("local-task");
+	iree_status_t      status     = iree_hal_driver_registry_try_create(
+        iree_hal_driver_registry_default(), identifier, host_allocator, &driver);
+
+	// Create default device
+	if (iree_status_is_ok(status))
+	{
+		status = iree_hal_driver_create_default_device(driver, host_allocator, &device_);
 	}
 
-	return iree_runtime_session_append_bytecode_module_from_file(
-		session_, model_path_.c_str());
+	iree_hal_driver_release(driver);
+	return status;
 }
-void IreeEngine::cleanupIree()
+iree_const_byte_span_t IreeEngine::loadBytecodeModule()
 {
-	if (session_) {
-		iree_runtime_session_release(session_);
-		session_ = nullptr;
-	}
-
-	if (device_) {
-		iree_hal_device_release(device_);
-		device_ = nullptr;
-	}
-
-	if (instance_) {
-		iree_runtime_instance_release(instance_);
-		instance_ = nullptr;
-	}
+	const struct iree_file_toc_t *module_file = D_dncnn_color_blind_create();
+	return iree_make_const_byte_span(module_file->data, module_file->size);
 }
-iree_hal_element_type_t IreeEngine::convertToIreeElementType(DataType type)
+bool IreeEngine::runInference(const void *input_data, void *output_data, bool detect_output)
 {
-	switch (type) {
+	const auto &input_desc = input_descs_[0];
+	size_t      input_size = input_desc.calculateSize();
+
+	std::vector<iree_hal_dim_t> shape(input_desc.shape.size());
+
+	for (size_t i = 0; i < input_desc.shape.size(); i++)
+	{
+		shape[i] = static_cast<iree_hal_dim_t>(input_desc.shape[i]);
+	}
+
+	iree_hal_element_type_t element_type = convertDataTypeToIree(input_desc.data_type);
+	if (element_type == IREE_HAL_ELEMENT_TYPE_NONE)
+	{
+		return false;
+	}
+
+	iree_hal_buffer_view_t *input_buffer_view = nullptr;
+	IREE_CHECK_OK(iree_hal_buffer_view_allocate_buffer_copy(
+	    device_, iree_hal_device_allocator(device_),
+	    input_desc.shape.size(), shape.data(), element_type,
+	    IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
+	    (iree_hal_buffer_params_t) {
+	        .usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
+	        .type  = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+	    },
+	    iree_make_const_byte_span(input_data, input_size),
+	    &input_buffer_view));
+
+	iree_vm_list_t *inputs = nullptr;
+	IREE_CHECK_OK(iree_vm_list_create(
+	    iree_vm_make_undefined_type_def(), 1, iree_allocator_system(), &inputs));
+
+	iree_vm_ref_t input_buffer_view_ref = iree_hal_buffer_view_move_ref(input_buffer_view);
+	IREE_CHECK_OK(iree_vm_list_push_ref_retain(inputs, &input_buffer_view_ref));
+
+	iree_vm_list_t *outputs = nullptr;
+	IREE_CHECK_OK(iree_vm_list_create(
+	    iree_vm_make_undefined_type_def(), 1, iree_allocator_system(), &outputs));
+
+	IREE_CHECK_OK(iree_vm_invoke(
+	    context_, main_function_, IREE_VM_INVOCATION_FLAG_NONE,
+	    nullptr, inputs, outputs, iree_allocator_system()));
+
+	iree_hal_buffer_view_t *ret_buffer_view = iree_vm_list_get_buffer_view_assign(outputs, 0);
+	if (ret_buffer_view == nullptr)
+	{
+		iree_vm_list_release(inputs);
+		iree_vm_list_release(outputs);
+		return false;
+	}
+
+	if (detect_output)
+	{
+		// Extract output information
+		iree_hal_element_type_t output_element_type = iree_hal_buffer_view_element_type(ret_buffer_view);
+		iree_host_size_t        rank                = iree_hal_buffer_view_shape_rank(ret_buffer_view);
+
+		// Create output TensorDesc
+		TensorDesc output_desc;
+		output_desc.shape.resize(rank);
+
+		for (iree_host_size_t i = 0; i < rank; ++i)
+		{
+			output_desc.shape[i] = iree_hal_buffer_view_shape_dim(ret_buffer_view, i);
+		}
+
+		// Set data type based on element type
+		switch (output_element_type)
+		{
+			case IREE_HAL_ELEMENT_TYPE_FLOAT_32:
+				output_desc.data_type = DataType::kFLOAT32;
+				break;
+			case IREE_HAL_ELEMENT_TYPE_FLOAT_16:
+				output_desc.data_type = DataType::kFLOAT16;
+				break;
+			case IREE_HAL_ELEMENT_TYPE_SINT_32:
+				output_desc.data_type = DataType::kINT32;
+				break;
+			case IREE_HAL_ELEMENT_TYPE_SINT_8:
+				output_desc.data_type = DataType::kINT8;
+				break;
+			default:
+				// Unknown data type
+				output_desc.data_type = DataType::kFLOAT32;
+				break;
+		}
+
+		// Assume same layout and memory type as input for now
+		output_desc.layout   = input_desc.layout;
+		output_desc.mem_type = input_desc.mem_type;
+		output_desc.name     = "output";
+
+		// Store output description
+		output_descs_.push_back(output_desc);
+	}
+	else if (output_data)
+	{
+		// Copy data from device to host
+		const auto &output_desc = output_descs_[0];
+		size_t      output_size = output_desc.calculateSize();
+
+		IREE_CHECK_OK(iree_hal_device_transfer_d2h(
+		    device_, iree_hal_buffer_view_buffer(ret_buffer_view), 0,
+		    output_data, output_size, IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
+		    iree_infinite_timeout()));
+	}
+
+	// Clean up
+	iree_vm_list_release(inputs);
+	iree_vm_list_release(outputs);
+
+	return true;
+}
+
+iree_hal_element_type_t IreeEngine::convertDataTypeToIree(DataType data_type) const
+{
+	switch (data_type)
+	{
 		case DataType::kFLOAT32:
 			return IREE_HAL_ELEMENT_TYPE_FLOAT_32;
 		case DataType::kFLOAT16:
@@ -227,86 +250,18 @@ iree_hal_element_type_t IreeEngine::convertToIreeElementType(DataType type)
 			return IREE_HAL_ELEMENT_TYPE_SINT_32;
 		case DataType::kINT8:
 			return IREE_HAL_ELEMENT_TYPE_SINT_8;
-		// case DataType::kUINT8:
-		// 	return IREE_HAL_ELEMENT_TYPE_UINT_8;
 		default:
 			return IREE_HAL_ELEMENT_TYPE_NONE;
 	}
 }
-DataType IreeEngine::convertFromIreeElementType(iree_hal_element_type_t type)
+
+bool IreeEngine::detectOutputInfo()
 {
-	switch (type) {
-		case IREE_HAL_ELEMENT_TYPE_FLOAT_32:
-			return DataType::kFLOAT32;
-		case IREE_HAL_ELEMENT_TYPE_FLOAT_16:
-			return DataType::kFLOAT16;
-		case IREE_HAL_ELEMENT_TYPE_SINT_32:
-			return DataType::kINT32;
-		case IREE_HAL_ELEMENT_TYPE_SINT_8:
-			return DataType::kINT8;
-		// case IREE_HAL_ELEMENT_TYPE_UINT_8:
-		// 	return DataType::UINT8;
-		default:
-			return DataType::kFLOAT32;
-	}
-}
-iree_status_t IreeEngine::createBufferView(const void *data, const TensorDesc &desc, iree_hal_buffer_view_t **out_buffer_view)
-{
-	iree_hal_dim_t dims[6]; // Assuming max 6D tensors
-	size_t rank = desc.shape.size();
-	if (rank > 6) {
-		return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-			"Tensor rank exceeds maximum supported dimensions (6)");
-	}
+	const auto &input_desc = input_descs_[0];
+	size_t      input_size = input_desc.calculateSize();
 
-	for (size_t i = 0; i < rank; ++i) {
-		dims[i] = static_cast<iree_hal_dim_t>(desc.shape[i]);
-	}
+	std::vector<uint8_t> dummy_input(input_size, 0);
 
-	iree_hal_element_type_t element_type = convertToIreeElementType(desc.data_type);
-	if (element_type == IREE_HAL_ELEMENT_TYPE_NONE) {
-		return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-			"Unsupported data type");
-	}
-
-	size_t element_size = desc.getElementsCount();
-	size_t total_size = element_size;
-	for (const auto& dim : desc.shape) {
-		total_size *= dim;
-	}
-
-	return iree_hal_buffer_view_allocate_buffer_copy(
-		device_,
-		iree_hal_device_allocator(device_),
-		rank, dims,
-		element_type,
-		IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-		createBufferParams(
-			IREE_HAL_BUFFER_USAGE_DEFAULT,
-			IREE_HAL_MEMORY_ACCESS_ALL,
-			IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL
-		),
-		iree_make_const_byte_span(data, total_size),
-		out_buffer_view
-	);
-}
-iree_status_t IreeEngine::extractModelInfo()
-{
-	// This is model-dependent and would need to be implemented based on your specific model
-	// For now, we'll just set some placeholders
-
-	// TODO: Extract real tensor info from the model or accompanying metadata
-	// This would typically involve querying the model for its input/output specifications
-
-	// Clear existing descriptors
-	input_descs_.clear();
-	output_descs_.clear();
-
-	// For demonstration, we'll assume the model expects and produces tensors with certain shapes
-	// You would replace this with actual model introspection
-
-	// Example: query function signature or reflection information from IREE
-
-	return iree_ok_status();
+	return runInference(dummy_input.data(), nullptr, true);
 }
 }        // namespace gomang
