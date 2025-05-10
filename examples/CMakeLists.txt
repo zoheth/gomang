@@ -59,3 +59,23 @@ target_include_directories(test_iree
         PRIVATE
         ${CMAKE_SOURCE_DIR}/models/iree
 )
+
+# nbvh
+add_executable(test_nbvh nbvh_test.cpp)
+
+target_link_libraries(test_nbvh
+        PRIVATE
+        gomang
+)
+
+target_include_directories(test_nbvh
+        PRIVATE
+        ${CMAKE_SOURCE_DIR}/gomang
+)
+
+if (ENABLE_TENSORRT)
+    target_compile_definitions(test_nbvh
+            PUBLIC
+            ENABLE_TENSORRT
+    )
+endif ()

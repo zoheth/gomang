@@ -44,13 +44,22 @@ void printSimpleOutputCheck(const std::vector<std::vector<float>>& output_buffer
 void Benchmark::run(int num_warmup, int num_infer) const
 {
 	std::cout << std::endl
-	          << "[[" << engine_->getName() << "]]:" << std::endl;
+			  << "[[" << engine_->getName() << "]]:" << std::endl;
 	engine_->printTensorInfo();
 
-	auto               input_info = engine_->getInputInfo();
-	std::vector<float> input_data(input_info[0].getElementsCount(), 0.f);
+	auto input_infos = engine_->getInputInfo();
 
-	std::vector<void *>             outputs;
+	std::vector<std::vector<float>> input_buffers;
+	std::vector<const void *> inputs;
+
+	for (const auto &desc : input_infos)
+	{
+		input_buffers.emplace_back(desc.getElementsCount(), 1.0f);
+		inputs.push_back(input_buffers.back().data());
+	}
+
+	// 创建输出缓冲区
+	std::vector<void *> outputs;
 	std::vector<std::vector<float>> output_buffers;
 	for (const auto &desc : engine_->getOutputInfo())
 	{
@@ -58,9 +67,7 @@ void Benchmark::run(int num_warmup, int num_infer) const
 		outputs.push_back(output_buffers.back().data());
 	}
 
-	std::vector<const void *> inputs = {input_data.data()};
-
-	std::cout << "Warmup..." << std::endl;
+	std::cout << "Warmup with " << inputs.size() << " inputs and " << outputs.size() << " outputs..." << std::endl;
 	for (int i = 0; i < num_warmup; ++i)
 	{
 		engine_->infer(inputs, outputs);
@@ -74,7 +81,7 @@ void Benchmark::run(int num_warmup, int num_infer) const
 		engine_->infer(inputs, outputs);
 	}
 
-	auto end      = std::chrono::high_resolution_clock::now();
+	auto end = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
 	printSimpleOutputCheck(output_buffers);

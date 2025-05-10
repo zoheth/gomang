@@ -163,7 +163,7 @@ void TrtEngine::initHandler()
 	}
 	cudaStreamCreate(&stream_);
 
-	// make the flexible one input and multi output
+	// Get all input and output tensors
 	int num_io_tensors = trt_engine_->getNbIOTensors();        // get the input and output's num
 
 	for (int i = 0; i < num_io_tensors; ++i)
@@ -171,7 +171,8 @@ void TrtEngine::initHandler()
 		auto           tensor_name = trt_engine_->getIOTensorName(i);
 		nvinfer1::Dims tensor_dims = trt_engine_->getTensorShape(tensor_name);
 
-		bool       is_input = (i == 0);
+		bool is_input = trt_engine_->getTensorIOMode(tensor_name) == nvinfer1::TensorIOMode::kINPUT;
+
 		TensorDesc desc     = createTensorDesc(tensor_name, tensor_dims, is_input);
 		auto       tensor   = std::make_shared<Tensor>(desc, &allocator_);
 		trt_context_->setTensorAddress(tensor_name, tensor->data());
